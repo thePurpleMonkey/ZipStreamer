@@ -52,6 +52,8 @@ class ZipStreamer(threading.Thread):
 
 	SIGNATURE_DATA_DESCRIPTOR = b"\x50\x4b\x07\x08"
 
+	VERSION_MINIMUM = b"\x04\x05"
+
 	def __init__(self, output, *args, **kwargs):
 		threading.Thread.__init__(self, *args, **kwargs)
 
@@ -90,7 +92,7 @@ class ZipStreamer(threading.Thread):
 		fd.last_modified_date = file_modification_date(datetime.date.today())
 
 		self._write(b"\x50\x4b\x03\x04")
-		self._write(self.VERSION)
+		self._write(self.VERSION_MINIMUM)
 		self._write(fd.flags)
 		self._write(fd.compression)
 		self._write(fd.last_modified_time)
@@ -136,7 +138,7 @@ class ZipStreamer(threading.Thread):
 		for fd in self.files:
 			cd.extend(b"\x50\x4b\x01\x02")                 # Signature
 			cd.extend(self.VERSION)                        # Version
-			cd.extend(self.VERSION)                        # Vers. needed
+			cd.extend(self.VERSION_MINIMUM)                # Vers. needed
 			cd.extend(fd.flags)
 			cd.extend(fd.compression)
 			cd.extend(fd.last_modified_time)
