@@ -48,6 +48,10 @@ class FileData:
 class ZipStreamer(threading.Thread):
 	VERSION = struct.pack("<H", 0x14)
 
+	FLAG_DATA_DESCRIPTOR = 1 << 3
+
+	SIGNATURE_DATA_DESCRIPTOR = b"\x50\x4b\x07\x08"
+
 	def __init__(self, output, *args, **kwargs):
 		threading.Thread.__init__(self, *args, **kwargs)
 
@@ -57,6 +61,12 @@ class ZipStreamer(threading.Thread):
 		self.files = []
 		self.offset = 0
 		self.eof = False
+
+	def __enter__(self):
+		self.start()
+
+	def __exit__(self, type, value, traceback):
+		self.close()
 		
 	def run(self):
 		while not self.eof:
@@ -70,23 +80,14 @@ class ZipStreamer(threading.Thread):
 		self.output.close()
 
 	def add_file(self, file, filename: str):
-		data: str = file.read()
-		crc32(b"\xde\xbb\x20\xe3")
-
 		fd = FileData()
-		fd.flags = b"\x00\x00"
+		fd.flags = struct.pack("<H", self.FLAG_DATA_DESCRIPTOR)
 		fd.compression = b"\x00\x00"
-		fd.crc32 = struct.pack("<I", crc32(data))
 		fd.filename = filename
 		fd.header_offset = struct.pack("<I", self.offset)
 
-
 		fd.last_modified_time = file_modification_time(datetime.datetime.now().time())
 		fd.last_modified_date = file_modification_date(datetime.date.today())
-		fd.uncompressed_size = struct.pack("<I", len(data))
-		fd.compressed_size = fd.uncompressed_size
-
-		self.files.append(fd)
 
 		self._write(b"\x50\x4b\x03\x04")
 		self._write(self.VERSION)
@@ -94,15 +95,35 @@ class ZipStreamer(threading.Thread):
 		self._write(fd.compression)
 		self._write(fd.last_modified_time)
 		self._write(fd.last_modified_date)
-		self._write(fd.crc32)
-		self._write(fd.compressed_size)
-		self._write(fd.uncompressed_size)
+		self._write(struct.pack("<I", 0)) # CRC in data descriptor
+		self._write(struct.pack("<I", 0)) # Uncompressed size in data descriptor
+		self._write(struct.pack("<I", 0)) # Compressed in data descriptor
 		self._write(struct.pack("<H", len(filename)))
 		self._write(struct.pack("<H", 0)) # Extra field len
 		# self._write(fd.header_offset)
 		self._write(filename.encode("utf-8"))
 
-		self._write(data)
+		size = 0
+		crc = 0
+
+		data: bytes = file.read1()
+		while data:
+			size += len(data)
+			crc = crc32(data, crc)
+			self._write(data)
+			data = file.read1()
+
+		# Write data descriptor
+		fd.crc32 = struct.pack("<I", crc)
+		fd.uncompressed_size = struct.pack("<I", size)
+		fd.compressed_size = fd.uncompressed_size
+
+		self._write(self.SIGNATURE_DATA_DESCRIPTOR)
+		self._write(fd.crc32)
+		self._write(fd.uncompressed_size)
+		self._write(fd.compressed_size)
+		
+		self.files.append(fd)
 
 	def _write(self, data: bytes):
 		self.input.write(data)
